@@ -1,0 +1,524 @@
+<meta charset="UTF-8">
+<title>Activity Constellation</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Quicksand:wght@500;600;700&display=swap">
+
+<!-- Three.js loaded first so 3d-force-graph's bundle detects and shares
+     window.THREE (same fix every prototype in this session needed). -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+
+<style>
+    :root {
+        --bg-top: #241a3d; --bg-bot: #0d0818;
+        --card: rgba(35, 24, 58, 0.68); --ink: #f0e6ff; --ink-strong: #ffb3d9; --ink-dim: #b8a8d9;
+        --border: rgba(255, 179, 217, 0.35); --mint: #8ce8c3;
+    }
+    body, html {
+        margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+        font-family: 'Quicksand', sans-serif; color: var(--ink);
+        background: radial-gradient(circle at 50% 30%, var(--bg-top), var(--bg-bot) 75%);
+    }
+    #3d-graph { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+
+    .card {
+        background: var(--card); border: 1.5px solid var(--border); border-radius: 18px;
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.35), 0 0 24px rgba(255,179,217,0.08);
+    }
+
+    #detail-panel {
+        position: absolute; top: 24px; right: -480px; bottom: 24px; width: 400px;
+        z-index: 100; transition: right 0.45s cubic-bezier(.2,.9,.25,1.1);
+        padding: 28px 26px; box-sizing: border-box; overflow-y: auto;
+        border: none;
+    }
+    #detail-panel.active { right: 24px; }
+
+    .prof-name { font-family: 'Baloo 2', sans-serif; font-size: 1.35rem; font-weight: 700; margin: 0 0 3px 0; color: var(--ink-strong); }
+
+    .time-of-use-box {
+        border: 1.5px solid var(--border); background: rgba(255,179,217,0.08); border-radius: 14px;
+        padding: 13px 16px; margin: 16px 0;
+    }
+    .box-label { color: var(--ink-strong); letter-spacing: 0.04em; font-size: 0.7rem; font-weight: 600; }
+    .time-highlight { font-family: 'Baloo 2', sans-serif; font-size: 1.4rem; font-weight: 700; color: var(--ink); margin-top: 4px; }
+
+    .log-heading { font-size: 0.78rem; margin-top: 20px; border-bottom: 1.5px solid var(--border); padding-bottom: 6px; font-weight: 700; color: var(--ink-strong); }
+    .log-list { font-size: 0.75rem; color: var(--ink); line-height: 1.65; margin-top: 12px; font-weight: 500; }
+    .log-item { border-bottom: 1px dashed rgba(255,179,217,0.15); padding: 7px 0; }
+    .log-item b { color: var(--mint); }
+
+    #support-card {
+        position: absolute; top: 24px; left: 24px; z-index: 50; max-width: 260px;
+        padding: 18px 20px; pointer-events: auto;
+    }
+    #support-card h2 {
+        margin: 0 0 6px 0; font-family: 'Baloo 2', sans-serif; font-size: 0.95rem; font-weight: 700; color: var(--ink-strong);
+    }
+    #support-card p { margin: 0 0 12px 0; font-size: 0.78rem; line-height: 1.55; color: var(--ink-dim); }
+    #support-card .support-links + p { margin-top: 14px; }
+    #support-card .support-links { display: flex; flex-wrap: wrap; gap: 8px; }
+    #support-card a {
+        font-size: 0.72rem; font-weight: 600; text-decoration: none; color: var(--ink);
+        border: 1.5px solid var(--border); border-radius: 999px; padding: 6px 13px;
+        transition: background 0.15s, color 0.15s;
+    }
+    #support-card a:hover { background: rgba(255,179,217,0.15); color: var(--ink-strong); }
+</style>
+
+<div class="card" id="support-card">
+    <h2>Support this project</h2>
+    <p>If you're in India, download Elara and give it a try.</p>
+    <div class="support-links">
+        <a href="https://apps.apple.com/in/app/elara-local-news-events/id6810100356" target="_blank" rel="noopener">App Store</a>
+        <a href="https://play.google.com/store/apps/details?id=com.uncoverroadsapp.elara&pcampaignid=web_share" target="_blank" rel="noopener">Play Store</a>
+    </div>
+    <p>Or follow the dev along on LinkedIn and X.</p>
+    <div class="support-links">
+        <a href="https://www.linkedin.com/in/sourav-biswas93/" target="_blank" rel="noopener">LinkedIn</a>
+        <a href="https://x.com/Sourav_Teddy" target="_blank" rel="noopener">X</a>
+    </div>
+</div>
+
+<div class="card" id="detail-panel">
+    <div class="prof-name" id="prof-name">device_id</div>
+
+    <div class="time-of-use-box">
+        <div class="box-label">Active span (first &rarr; last seen)</div>
+        <div class="time-highlight" id="prof-duration">00h 00m 00s</div>
+    </div>
+
+    <div class="log-heading">Recent app_events</div>
+    <div class="log-list" id="prof-logs"></div>
+</div>
+
+<div id="3d-graph"></div>
+
+<script>
+    // This file ships with synthetic demo data (DUMMY_USERS below) so it
+    // runs standalone with zero setup. To point it at your own database,
+    // replace DUMMY_USERS with an async fetch (e.g. Supabase, or any REST
+    // endpoint) that resolves the same shape, then set baseUsers to its
+    // result before initPresentation() runs — see README for a worked
+    // example. Never fetch with a service/admin key from the browser;
+    // only ever call it with a key restricted to read-only public data.
+
+    // ---- Generic event vocabulary for a device-activity dataset shaped
+    // like app_users + app_events (device_id / points / platform / city on
+    // the user side; event_type / created_at / metadata on the event
+    // side). Swap DUMMY_USERS below for your own fetch and this vocabulary
+    // for your own event_type values — everything else in the file reads
+    // off the shape, not specific names.
+    const EVENT_META = {
+        session_start:              { color: '#c9a8f0', label: 'Session start' },
+        item_viewed:                 { color: '#9fd8f5', label: 'Viewed an item' },
+        item_shared:                 { color: '#ffb599', label: 'Shared an item' },
+        action_completed:            { color: '#fff3a3', label: 'Completed an action' },
+        location_used:                { color: '#8ce8c3', label: 'Used live location' },
+        filter_toggled:               { color: '#ffb3d9', label: 'Toggled a filter' },
+        feature_unlocked:             { color: '#ffcc99', label: 'Unlocked a feature' },
+        region_switched:              { color: '#ff9d9d', label: 'Switched region' },
+        menu_opened:                  { color: '#e0c9f0', label: 'Opened menu' },
+        onboarding_region_selected:   { color: '#ffd9a8', label: 'Picked home region' },
+        link_opened:                  { color: '#a8d9f0', label: 'Opened a link' },
+        panel_opened:                 { color: '#f0e6a8', label: 'Viewed a panel' },
+        about_viewed:                 { color: '#c9d9f0', label: 'Viewed About' },
+        app_shared:                   { color: '#ffc9b5', label: 'Shared the app' },
+        privacy_viewed:               { color: '#b8c9d9', label: 'Viewed privacy policy' },
+        data_deletion_requested:      { color: '#ff8f8f', label: 'Requested data deletion' },
+        referral_earned:              { color: '#a8f0c9', label: 'Got referral credit' },
+        link_copied:                  { color: '#d9c9f0', label: 'Copied app link' },
+        feedback_opened:              { color: '#ffdca8', label: 'Opened feedback' },
+        cta_clicked:                  { color: '#a8f0e0', label: 'Tapped a prompt' },
+    };
+    const EVENT_TYPES = Object.keys(EVENT_META);
+    const REGIONS = ['Northgate', 'Riverside', 'Lakeview', 'Old Town', 'Harbor District', 'Uptown', 'Westfield'];
+    const PLATFORM_COLOR = { ios: '#9fd8f5', android: '#8ce8c3', web: '#ffcc99' };
+    const PLATFORMS = Object.keys(PLATFORM_COLOR);
+    const INACTIVE_COLOR = '#4a4258';
+    const CONTENT_TITLES = [
+        '"Weekly community roundup posted"',
+        '"New feature spotlight: what changed this week"',
+        '"Local event calendar updated"',
+        '"Neighborhood safety advisory"',
+        '"Tips for getting the most out of the app"',
+    ];
+
+    function rand(a, b) { return Math.random() * (b - a) + a; }
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+    function detailFor(type) {
+        switch (type) {
+            case 'session_start': return 'App opened';
+            case 'item_viewed': return pick(CONTENT_TITLES);
+            case 'item_shared': return 'Sent to ' + pick(['Messages', 'Social']);
+            case 'action_completed': return '+' + pick([1, 1, 1, 10]) + ' pts';
+            case 'location_used': return 'Recentered on live location';
+            case 'filter_toggled': return 'Filtered to ' + pick(['Category A', 'Category B', 'Category C', 'Category D']);
+            case 'feature_unlocked': return 'Unlocked ' + pick(REGIONS) + ' for 20 pts';
+            case 'region_switched': return 'Switched to ' + pick(REGIONS);
+            default: return EVENT_META[type] ? EVENT_META[type].label : type;
+        }
+    }
+
+    // ---- DUMMY_USERS: synthetic devices shaped like a real app_users +
+    // app_events export. Swap this array (and the fetch that built it) for
+    // your own data — everything downstream just reads id/points/platform/
+    // city/totalDurationMs/size/color/inactive/events off each row.
+    const N_USERS = 48;
+    const DUMMY_USERS = Array.from({ length: N_USERS }, (_, i) => {
+        const isInactive = Math.random() < 0.1;
+        const points = isInactive ? 0 : Math.round(rand(0, 480));
+        const platform = pick(PLATFORMS);
+        const city = pick(REGIONS);
+        // First-seen -> last-seen span: minutes for a single-session user,
+        // up to ~30 days for a long-time regular.
+        const totalDurationMs = isInactive ? 0 : Math.round(rand(30_000, 30 * 24 * 3600 * 1000));
+        const evCount = isInactive ? 0 : Math.max(1, Math.round(points / 40) + 1);
+        const events = [];
+        let t = Date.now() - rand(0, 14 * 24 * 3600 * 1000);
+        for (let j = 0; j < evCount; j++) {
+            t += rand(20_000, 380_000);
+            const type = j === 0 ? 'session_start' : pick(EVENT_TYPES.slice(1));
+            events.push({ type, time: new Date(t), detail: detailFor(type) });
+        }
+        return {
+            id: 'device_' + i, points, platform, city, totalDurationMs, events,
+            size: (isInactive ? 3.2 : 5) + Math.sqrt(points) * 0.6,
+            color: isInactive ? INACTIVE_COLOR : PLATFORM_COLOR[platform],
+            inactive: isInactive,
+        };
+    });
+    const baseUsers = DUMMY_USERS;
+
+    let Graph, selectedNodeId = null, isUserInteracting = false, interactionTimer = null;
+    let activeNodes = JSON.parse(JSON.stringify(baseUsers));
+    let activeLinks = [];
+
+    // three-render-objects (which 3d-force-graph is built on) adds its own
+    // default lights automatically, tuned very bright for its own default
+    // unlit-ish node material — ambient ~3.14, directional ~1.88.
+    // MeshLambertMaterial (unlike the unlit MeshBasicMaterial used in the
+    // earlier version of this file) actually responds to that, washing
+    // every blob toward white regardless of emissive color. Declared at
+    // top level (not nested inside initPresentation, which was a real bug —
+    // startGlobalScrubLoop's own call to this threw a silent
+    // ReferenceError every tick, never dimming anything) so both the
+    // initial pass and the continuous per-tick pass in the scrub loop
+    // below can reach it. Sets a fixed target value rather than repeatedly
+    // multiplying, so calling it every tick is harmless either way.
+    const DIMMED_INTENSITY = { AmbientLight: 0.85, DirectionalLight: 0.5 };
+    function dimDefaultLights() {
+        Graph.scene().children.forEach(c => {
+            if (c.isLight && DIMMED_INTENSITY[c.type] !== undefined) c.intensity = DIMMED_INTENSITY[c.type];
+        });
+    }
+
+    // Node meshes are cached by id and reused rather than rebuilt on every
+    // nodeThreeObject call — without this, a node with per-frame vertex
+    // displacement piles up dozens of overlapping ghost meshes per node as
+    // 3d-force-graph re-invokes nodeThreeObject on every simulation tick,
+    // reading as washed-out/broken color rather than an obvious glitch
+    // (confirmed the hard way earlier: 184 meshes for 40 nodes).
+    const nodeMeshCache = new Map();
+
+    // Real first-seen→last-seen spans run from minutes to multiple days,
+    // unlike the old dummy data's fixed 30s-90min range — show days once
+    // the span crosses 24h instead of one very large hour count.
+    function formatMsToTime(ms) {
+        const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((ms / (1000 * 60 * 60)) % 24);
+        const minutes = Math.floor((ms / (1000 * 60)) % 60);
+        const seconds = Math.floor((ms / 1000) % 60);
+        if (days > 0) return `${days}d ${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m`;
+        return `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+    }
+    function fmtClock(d) {
+        return new Date(d).toLocaleTimeString('en-IN', { hour12: false });
+    }
+    function easeOutElastic(t) {
+        const c4 = (2 * Math.PI) / 3;
+        return t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+    }
+
+    async function initPresentation() {
+        activeNodes = JSON.parse(JSON.stringify(baseUsers));
+        activeLinks = [];
+
+        Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+            .graphData({ nodes: activeNodes, links: activeLinks })
+            .backgroundColor('#150f24')
+            .showNavInfo(false)
+            .d3Force('link', d3.forceLink().distance(link => link.type === 'TEMPORAL' ? 30 : 90))
+            .nodeThreeObject(node => {
+                if (nodeMeshCache.has(node.id)) return nodeMeshCache.get(node.id);
+
+                const isSatellite = node.type === 'TEMPORAL';
+                const geometry = isSatellite
+                    ? new THREE.SphereGeometry(2, 20, 20)
+                    : new THREE.SphereGeometry(node.size, 32, 32);
+                // MeshLambertMaterial + emissive, not a wireframe and not
+                // MeshPhysicalMaterial/clearcoat — the latter (and
+                // MeshDistortMaterial, which extends it) washes out to
+                // near-white against 3d-force-graph's own very bright
+                // default lights (confirmed: ambient ~3.14, directional
+                // ~1.88). Emissive stays true to node.color regardless.
+                const material = new THREE.MeshLambertMaterial({
+                    color: new THREE.Color(node.color || '#ffb3d9'),
+                    emissive: new THREE.Color(node.color || '#ffb3d9'),
+                    emissiveIntensity: 0.45,
+                    transparent: true,
+                    opacity: 1,
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+
+                mesh.onBeforeRender = () => {
+                    const time = performance.now() * 0.0035;
+                    if (!isSatellite) {
+                        const positionAttribute = geometry.attributes.position;
+                        const vertex = new THREE.Vector3();
+                        for (let i = 0; i < positionAttribute.count; i++) {
+                            vertex.fromBufferAttribute(positionAttribute, i);
+                            vertex.normalize();
+                            const wave = Math.sin(vertex.x * 2.5 + time) * Math.cos(vertex.y * 2.5 + time) * 0.4;
+                            vertex.multiplyScalar(node.size + wave);
+                            positionAttribute.setXYZ(i, vertex.x, vertex.y, vertex.z);
+                        }
+                        positionAttribute.needsUpdate = true;
+                        geometry.computeVertexNormals();
+                    } else {
+                        // Elastic "pop" on spawn — spring-overshoots past
+                        // full size then settles, rather than snapping
+                        // straight to its orbit spot. Reads as bouncing out
+                        // from the parent rather than being placed.
+                        const spawnElapsed = performance.now() - (node.spawnTime || 0);
+                        const introT = Math.min(spawnElapsed / 700, 1);
+                        const introScale = easeOutElastic(introT);
+                        const pulse = 1 + Math.sin(time * 2 + node.id.length) * 0.12;
+                        mesh.scale.setScalar(introScale * pulse);
+                    }
+                };
+                nodeMeshCache.set(node.id, mesh);
+                return mesh;
+            })
+            .nodeLabel(node => node.type === 'TEMPORAL'
+                ? `[${fmtClock(node.time)}] ${EVENT_META[node.eventType] ? EVENT_META[node.eventType].label : node.eventType}`
+                : `${node.id} &middot; ${node.platform} &middot; ${node.points} pts`)
+            .linkVisibility(false)
+            .onNodeClick(node => {
+                if (node.type === 'TEMPORAL') { if (selectedNodeId) exitDetailView(); return; }
+                openUser(node);
+            })
+            .onBackgroundClick(() => { if (selectedNodeId) exitDetailView(); });
+
+        // Soft ambient light instead of scan-matrix/starfield decoration —
+        // the emissive materials already carry most of the color, this
+        // just keeps shading gentle rather than harsh.
+        Graph.controls().zoomSpeed = 4.5;
+
+        dimDefaultLights();
+
+        setupInteractionTrackers();
+        startGlobalScrubLoop();
+        startSatelliteFollowLoop();
+    }
+
+    function openUser(node) {
+        if (selectedNodeId === node.id) return;
+        selectedNodeId = node.id;
+
+        const viewDist = 40 + node.size * 3.5;
+        Graph.cameraPosition({ x: node.x, y: node.y, z: node.z + viewDist }, { x: node.x, y: node.y, z: node.z }, 1000);
+
+        setTimeout(() => {
+            document.getElementById('prof-name').innerText = node.id;
+            document.getElementById('prof-duration').innerText = formatMsToTime(node.totalDurationMs || 0);
+
+            const logContainer = document.getElementById('prof-logs');
+            const events = (node.events || []).slice().sort((a, b) => b.time - a.time);
+            logContainer.innerHTML = events.length ? '' : '// no app_events recorded for this device';
+            events.forEach(ev => {
+                const meta = EVENT_META[ev.type] || { label: ev.type };
+                logContainer.innerHTML += `<div class="log-item">[${fmtClock(ev.time)}] <b>${meta.label}</b> &mdash; ${ev.detail}</div>`;
+            });
+
+            document.getElementById('detail-panel').classList.add('active');
+
+            bloomSatellites(node);
+            // Satellite meshes are only built on the next nodeThreeObject
+            // pass after graphData() updates, so defer the highlight pass
+            // a frame or two past bloomSatellites rather than dimming
+            // before they exist.
+            setTimeout(updateNodeHighlight, 50);
+        }, 300);
+    }
+
+    // Dims every blob except the selected one and its own satellites, so
+    // the constellation reads as "this device" instead of a wall of equally
+    // bright dots. selectedNodeId falsy means no dimming (full reset).
+    function updateNodeHighlight() {
+        nodeMeshCache.forEach((mesh, id) => {
+            const isSelected = id === selectedNodeId;
+            const isOwnSatellite = selectedNodeId && id.startsWith(`${selectedNodeId}_evt_`);
+            const dim = selectedNodeId && !isSelected && !isOwnSatellite;
+            mesh.material.opacity = dim ? 0.12 : 1;
+            mesh.material.emissiveIntensity = dim ? 0.12 : (isSelected || isOwnSatellite ? 0.75 : 0.45);
+        });
+    }
+
+    function bloomSatellites(node) {
+        // Freeze the parent too, not just the satellites. Without this the
+        // forceLink pulling each fixed satellite toward the (still-mobile)
+        // parent instead drags the PARENT toward the average of the
+        // satellites' fixed positions — the parent visibly detaches and
+        // slides off to one side while the satellite fan stays put,
+        // reading as "everything bunched on one plane" even though the
+        // satellites themselves are genuinely spherical around where the
+        // parent USED to be.
+        node.fx = node.x; node.fy = node.y; node.fz = node.z;
+
+        // Even spread on an actual sphere (not per-axis jitter, which the
+        // force simulation's link/charge forces settled toward a roughly
+        // flat disk once nodes started drifting) plus fx/fy/fz to pin each
+        // satellite in place — the simulation never gets a chance to
+        // collapse them back toward one plane after they're placed.
+        // Radius scales with the parent's own rendered size (+ a clear
+        // gap) — a fixed 15 was smaller than large/high-activity parent
+        // blobs, so satellites spawned inside or right on the surface and
+        // read as "swallowed."
+        const orbitRadius = node.size + 22;
+        const spawnTime = performance.now();
+        const satelliteNodes = (node.events || []).map((ev, idx) => {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const ox = orbitRadius * Math.sin(phi) * Math.cos(theta);
+            const oy = orbitRadius * Math.sin(phi) * Math.sin(theta);
+            const oz = orbitRadius * Math.cos(phi);
+            return {
+                id: `${node.id}_evt_${idx}`,
+                type: 'TEMPORAL',
+                eventType: ev.type,
+                time: ev.time,
+                color: EVENT_META[ev.type] ? EVENT_META[ev.type].color : '#ffb3d9',
+                x: node.x + ox, y: node.y + oy, z: node.z + oz,
+                fx: node.x + ox, fy: node.y + oy, fz: node.z + oz,
+                spawnTime,
+                // Fixed offset from the parent — the satellite's resting
+                // spot relative to wherever the parent currently is. It
+                // doesn't teleport there; startSatelliteFollowLoop springs
+                // toward it (see followVX/VY/VZ below), so dragging the
+                // parent tugs its satellites along with a trailing,
+                // slightly elastic lag instead of a rigid, instant snap.
+                followOffset: { x: ox, y: oy, z: oz },
+                followVX: 0, followVY: 0, followVZ: 0,
+            };
+        });
+        const satelliteLinks = satelliteNodes.map(s => ({ source: node.id, target: s.id, type: 'TEMPORAL' }));
+
+        activeNodes = [...activeNodes.filter(n => n.type !== 'TEMPORAL'), ...satelliteNodes];
+        activeLinks = satelliteLinks;
+        Graph.graphData({ nodes: activeNodes, links: activeLinks });
+    }
+
+    // Keeps each satellite tethered to its parent's current position, but
+    // via a damped spring rather than an instant snap — when the parent is
+    // dragged, each satellite's TARGET spot (parent position + its fixed
+    // followOffset) jumps immediately, while the satellite itself eases
+    // toward that target with a slight elastic overshoot before settling.
+    // Under-damped on purpose (dampingRatio < 1) for that overshoot; too
+    // low and it wobbles distractingly, too high and it just looks like a
+    // slow instant-snap, so keep any retune inside roughly 0.55-0.8.
+    // Writes straight into the cached mesh position each frame so it
+    // applies even while the underlying force simulation is idle.
+    const FOLLOW_STIFFNESS = 140;   // pull strength toward the target
+    const FOLLOW_DAMPING = 16;      // resistance to the spring's own velocity — dampingRatio = 16 / (2*sqrt(140)) ≈ 0.68
+    let followLoopStarted = false;
+    function startSatelliteFollowLoop() {
+        if (followLoopStarted) return;
+        followLoopStarted = true;
+        let lastTime = performance.now();
+        function tick() {
+            const now = performance.now();
+            // Clamp dt so a dropped/backgrounded frame can't fling the
+            // spring integrator into a huge, unstable jump.
+            const dt = Math.min((now - lastTime) / 1000, 0.05);
+            lastTime = now;
+
+            const parent = selectedNodeId ? activeNodes.find(n => n.id === selectedNodeId) : null;
+            if (parent) {
+                for (const sat of activeNodes) {
+                    if (sat.type !== 'TEMPORAL' || !sat.followOffset) continue;
+                    const targetX = parent.x + sat.followOffset.x;
+                    const targetY = parent.y + sat.followOffset.y;
+                    const targetZ = parent.z + sat.followOffset.z;
+
+                    // Damped harmonic oscillator: acceleration pulls toward
+                    // the target proportional to distance (spring), minus
+                    // velocity proportional to speed (damping/friction).
+                    const ax = FOLLOW_STIFFNESS * (targetX - sat.x) - FOLLOW_DAMPING * sat.followVX;
+                    const ay = FOLLOW_STIFFNESS * (targetY - sat.y) - FOLLOW_DAMPING * sat.followVY;
+                    const az = FOLLOW_STIFFNESS * (targetZ - sat.z) - FOLLOW_DAMPING * sat.followVZ;
+                    sat.followVX += ax * dt;
+                    sat.followVY += ay * dt;
+                    sat.followVZ += az * dt;
+                    sat.x += sat.followVX * dt;
+                    sat.y += sat.followVY * dt;
+                    sat.z += sat.followVZ * dt;
+                    sat.fx = sat.x; sat.fy = sat.y; sat.fz = sat.z;
+
+                    const mesh = nodeMeshCache.get(sat.id);
+                    if (mesh) mesh.position.set(sat.x, sat.y, sat.z);
+                }
+            }
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+    }
+
+    function exitDetailView() {
+        document.getElementById('detail-panel').classList.remove('active');
+
+        const prevSelected = activeNodes.find(n => n.id === selectedNodeId);
+        if (prevSelected) { delete prevSelected.fx; delete prevSelected.fy; delete prevSelected.fz; }
+        selectedNodeId = null;
+
+        activeNodes = activeNodes.filter(n => n.type !== 'TEMPORAL');
+        activeLinks = [];
+        Graph.graphData({ nodes: activeNodes, links: activeLinks });
+        Graph.cameraPosition({ x: 0, y: 0, z: 260 }, { x: 0, y: 0, z: 0 }, 1000);
+        updateNodeHighlight();
+    }
+
+    function setupInteractionTrackers() {
+        const container = document.getElementById('3d-graph');
+        function registerAction() {
+            isUserInteracting = true;
+            clearTimeout(interactionTimer);
+            interactionTimer = setTimeout(() => { isUserInteracting = false; }, 4500);
+        }
+        container.addEventListener('wheel', registerAction, { passive: true });
+        container.addEventListener('mousedown', () => {
+            registerAction();
+            window.addEventListener('mousemove', registerAction, { passive: true });
+        });
+        window.addEventListener('mouseup', () => { window.removeEventListener('mousemove', registerAction); });
+    }
+
+    let angle = 0;
+    function startGlobalScrubLoop() {
+        setInterval(() => {
+            // Idempotent — sets a fixed target each tick rather than
+            // multiplying, so calling it repeatedly is harmless. Cheap
+            // enough (2-3 scene children) to just always run instead of
+            // trying to guess the exact tick the library's lights appear on.
+            dimDefaultLights();
+
+            if (!selectedNodeId && !isUserInteracting) {
+                Graph.cameraPosition({ x: 260 * Math.sin(angle), z: 260 * Math.cos(angle), y: 20 });
+                angle += 0.0012;
+            }
+        }, 30);
+    }
+
+    initPresentation();
+</script>
