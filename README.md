@@ -47,6 +47,31 @@ To go live:
 
 The `EVENT_META` object (search for `const EVENT_META`) maps each `event_type` to a label and color for the satellite blobs and detail log — add or rename entries to match your own event vocabulary.
 
+## Importing your data with an AI coding assistant
+
+If you're using an AI coding assistant (Claude Code, Cursor, etc.) to do the wiring, a prompt like this works well — fill in your own table/field names first:
+
+```
+I have a database table of users/devices called <TABLE_NAME> with columns
+<COLUMN_NAMES>, and an events table called <EVENTS_TABLE_NAME> with columns
+<COLUMN_NAMES> (at minimum a foreign key back to the user, an event type,
+and a timestamp).
+
+Fetch this data using <read-only key / service key run only on my machine,
+never in the browser> and transform it into the shape index.html's
+DUMMY_USERS array expects (see the README's "Wiring in your own data"
+section): one object per user with id, points, platform, city,
+totalDurationMs, size, color, inactive, and an events array of
+{ type, time, detail }.
+
+Bake the result into index.html as a static array named DUMMY_USERS,
+replacing the existing synthetic data. Do not query the database live
+from the browser, and do not put any database credentials in the HTML
+file itself.
+```
+
+This mirrors how this project's own demo data was generated — fetched once, transformed into the expected shape, and baked in as a static array, rather than wired up as a live in-browser connection.
+
 ## Removing the "support this project" card
 
 There's a small card in the top-left corner with links to support the original developer. To remove it:
